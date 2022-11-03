@@ -39,6 +39,8 @@ class LGDevice(MediaPlayerEntity):
     _attr_supported_features = (
         MediaPlayerEntityFeature.VOLUME_SET
         | MediaPlayerEntityFeature.VOLUME_MUTE
+        | MediaPlayerEntityFeature.TURN_ON
+        | MediaPlayerEntityFeature.TURN_OFF
         | MediaPlayerEntityFeature.SELECT_SOURCE
         | MediaPlayerEntityFeature.SELECT_SOUND_MODE
     )
@@ -80,51 +82,66 @@ class LGDevice(MediaPlayerEntity):
         self._device.get_mac_info()
         self.update()
 
+    def get_value(self, data, key, default_value):
+        """Get value from data object if key exists."""
+        return data[key] if key in data else default_value
+
+    def handle_eq_view_info_event(self, data):
+        """Set values for EQ_VIEW_INFO event response."""
+        self._bass = self.get_value(data, "i_bass", self._bass)
+        self._treble = self.get_value(data, "i_treble", self._treble)
+        self._equalisers = self.get_value(data, "ai_eq_list", self._equalisers)
+        self._equaliser = self.get_value(data, "i_curr_eq", self._equaliser)
+
+    def handle_spk_list_view_info_event(self, data):
+        """Set values for SPK_LIST_VIEW_INFO event response."""
+        self._volume = self.get_value(data, "i_vol", self._volume)
+        self._volume_min = self.get_value(data, "i_vol_min", self._volume_min)
+        self._volume_max = self.get_value(data, "i_vol_max", self._volume_max)
+        self._function = self.get_value(data, "i_curr_func", self._function)
+        if "b_powerstatus" in data:
+            if data["b_power_status"]:
+                self._attr_state = MediaPlayerState.ON
+            else:
+                self._attr_state = MediaPlayerState.OFF
+
+    def handle_func_view_info_event(self, data):
+        """Set values for FUNC_VIEW_INFO event response."""
+        self._function = self.get_value(data, "i_curr_func", self._function)
+        self._functions = self.get_value(data, "ai_func_list", self._functions)
+
+    def handle_setting_view_info_event(self, data):
+        """Set values for SETTING_VIEW_INFO event response."""
+        self._rear_volume_min = self.get_value(
+            data, "i_rear_min", self._rear_volume_min
+        )
+        self._rear_volume_max = self.get_value(
+            data, "i_rear_max", self._rear_volume_max
+        )
+        self._rear_volume = self.get_value(data, "i_rear_level", self._rear_volume)
+        self._woofer_volume_min = self.get_value(
+            data, "i_woofer_min", self._woofer_volume_min
+        )
+        self._woofer_volume_max = self.get_value(
+            data, "i_woofer_max", self._woofer_volume_max
+        )
+        self._woofer_volume = self.get_value(
+            data, "i_woofer_level", self._woofer_volume
+        )
+        self._equaliser = self.get_value(data, "i_curr_eq", self._equaliser)
+        self._attr_name = self.get_value(data, "s_user_name", self._attr_name)
+
     def handle_event(self, response):
         """Handle responses from the speakers."""
         data = response["data"]
         if response["msg"] == "EQ_VIEW_INFO":
-            if "i_bass" in data:
-                self._bass = data["i_bass"]
-            if "i_treble" in data:
-                self._treble = data["i_treble"]
-            if "ai_eq_list" in data:
-                self._equalisers = data["ai_eq_list"]
-            if "i_curr_eq" in data:
-                self._equaliser = data["i_curr_eq"]
+            self.handle_eq_view_info_event(data)
         elif response["msg"] == "SPK_LIST_VIEW_INFO":
-            if "i_vol" in data:
-                self._volume = data["i_vol"]
-            if "i_vol_min" in data:
-                self._volume_min = data["i_vol_min"]
-            if "i_vol_max" in data:
-                self._volume_max = data["i_vol_max"]
-            if "b_mute" in data:
-                self._mute = data["b_mute"]
-            if "i_curr_func" in data:
-                self._function = data["i_curr_func"]
+            self.handle_spk_list_view_info_event(data)
         elif response["msg"] == "FUNC_VIEW_INFO":
-            if "i_curr_func" in data:
-                self._function = data["i_curr_func"]
-            if "ai_func_list" in data:
-                self._functions = data["ai_func_list"]
+            self.handle_func_view_info_event(data)
         elif response["msg"] == "SETTING_VIEW_INFO":
-            if "i_rear_min" in data:
-                self._rear_volume_min = data["i_rear_min"]
-            if "i_rear_max" in data:
-                self._rear_volume_max = data["i_rear_max"]
-            if "i_rear_level" in data:
-                self._rear_volume = data["i_rear_level"]
-            if "i_woofer_min" in data:
-                self._woofer_volume_min = data["i_woofer_min"]
-            if "i_woofer_max" in data:
-                self._woofer_volume_max = data["i_woofer_max"]
-            if "i_woofer_level" in data:
-                self._woofer_volume = data["i_woofer_level"]
-            if "i_curr_eq" in data:
-                self._equaliser = data["i_curr_eq"]
-            if "s_user_name" in data:
-                self._attr_name = data["s_user_name"]
+            self.handle_setting_view_info_event(data)
 
         self.schedule_update_ha_state()
 
@@ -136,26 +153,26 @@ class LGDevice(MediaPlayerEntity):
         self._device.get_settings()
 
     @property
-    def volume_level(self):
+    def volume_level(self) -> float | None:
         """Volume level of the media player (0..1)."""
         if self._volume_max != 0:
             return self._volume / self._volume_max
         return 0
 
     @property
-    def is_volume_muted(self):
+    def is_volume_muted(self) -> bool | None:
         """Boolean if volume is currently muted."""
         return self._mute
 
     @property
-    def sound_mode(self):
+    def sound_mode(self) -> str | None:
         """Return the current sound mode."""
         if self._equaliser == -1 or self._equaliser >= len(temescal.equalisers):
             return None
         return temescal.equalisers[self._equaliser]
 
     @property
-    def sound_mode_list(self):
+    def sound_mode_list(self) -> list[str] | None:
         """Return the available sound modes."""
         modes = []
         for equaliser in self._equalisers:
@@ -164,14 +181,14 @@ class LGDevice(MediaPlayerEntity):
         return sorted(modes)
 
     @property
-    def source(self):
+    def source(self) -> str | None:
         """Return the current input source."""
         if self._function == -1 or self._function >= len(temescal.functions):
             return None
         return temescal.functions[self._function]
 
     @property
-    def source_list(self):
+    def source_list(self) -> list[str] | None:
         """List of available input sources."""
         sources = []
         for function in self._functions:
@@ -195,3 +212,17 @@ class LGDevice(MediaPlayerEntity):
     def select_sound_mode(self, sound_mode: str) -> None:
         """Set Sound Mode for Receiver.."""
         self._device.set_eq(temescal.equalisers.index(sound_mode))
+
+    def turn_on(self) -> None:
+        """Turn the media player on."""
+        self._set_power(True)
+
+    def turn_off(self) -> None:
+        """Turn the media player off."""
+        self._set_power(False)
+
+    def _set_power(self, status) -> None:
+        """Set the media player state."""
+        self._device.send_packet(
+            {"cmd": "set", "data": {"b_powerkey": status}, "msg": "SPK_LIST_VIEW_INFO"}
+        )
